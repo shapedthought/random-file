@@ -7,4 +7,10 @@ edition = "2021"
 
 [dependencies]
 fake = { version = "2.5", features=['derive']}
+clap = { version = "3.2.19", features=['derive']}
 rand = "0.8"
+rayon = "1.5.3"
+spinners = "4.1.0"
+dialoguer = "0.10.2"
+num_cpus = "1.13.1"
+indicatif = "0.17.0"
