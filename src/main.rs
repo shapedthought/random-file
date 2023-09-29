@@ -21,7 +21,7 @@ pub struct Cli {
 
     /// Confirms the creation of files without interaction
     #[clap(short, long, default_value = "false")]
-    confirm: bool
+    confirm: bool,
 }
 
 #[derive(Subcommand)]
@@ -60,16 +60,30 @@ enum FileSizes {
     },
 }
 
-fn check_ok(files: &i64, cap: &i64) -> bool {
-    let max_cap = (files * cap) / 1048576;
-    println!("Max capacity is {} MB", max_cap);
+fn check_ok(files: &i64) -> bool {
     Confirm::new()
         .with_prompt(format!("Are you sure you want to create {} files?", files))
         .interact()
         .unwrap()
 }
 
+fn calculate_total(files: &i64, cap: &i64, random: bool) {
+    let total_cap = files * cap;
+    let rand_string = if random {
+        "Max"
+    } else {
+        "Total"
+    };
+    match total_cap {
+        0..=1024 => println!("{} capacity is {} KB", rand_string, total_cap),
+        1025..=1048576 => println!("{} capacity is {} MB", rand_string, total_cap / 1024),
+        _ => println!("{} capacity is {} GB", rand_string, total_cap / 1048576),
+    }
+}
+
 fn static_files(files: i32, size: usize, threads: usize, path: PathBuf, confirm: bool) {
+    calculate_total(&files.into(), &(size as i64), false);
+
     rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
         .build_global()
@@ -81,7 +95,7 @@ fn static_files(files: i32, size: usize, threads: usize, path: PathBuf, confirm:
 
     if confirm {
         run_static(files, size_kb, path, bar);
-    } else if check_ok(&files.into(), &(size as i64)) {
+    } else if check_ok(&files.into()) {
         run_static(files, size_kb, path, bar);
     } else {
         println!("Quitting")
@@ -99,7 +113,16 @@ fn run_static(files: i32, size: usize, path: PathBuf, bar: ProgressBar) {
     });
 }
 
-fn random_files(files: i32, lower: usize, higher: usize, threads: usize, path: PathBuf, confirm: bool) {
+fn random_files(
+    files: i32,
+    lower: usize,
+    higher: usize,
+    threads: usize,
+    path: PathBuf,
+    confirm: bool,
+) {
+    calculate_total(&files.into(), &(higher as i64), true);
+
     rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
         .build_global()
@@ -112,7 +135,7 @@ fn random_files(files: i32, lower: usize, higher: usize, threads: usize, path: P
 
     if confirm {
         run_random(files, lower_kb, higher_kb, path, bar);
-    } else if check_ok(&files.into(), &(higher as i64)) {
+    } else if check_ok(&files.into()) {
         run_random(files, lower_kb, higher_kb, path, bar);
     } else {
         println!("Quitting")
