@@ -1,71 +1,150 @@
+use clap::{Parser, Subcommand};
 use fake::Fake;
 use rand::Rng;
 use rayon::prelude::*;
 use std::fs::File;
 use std::io::prelude::*;
-use clap::Parser;
+use std::path::PathBuf;
 // use spinners::{Spinner, Spinners};
-use num_cpus;
-use indicatif::ProgressBar;
 use dialoguer::Confirm;
-
+use indicatif::ProgressBar;
 
 #[derive(Parser)]
 #[clap(author, version)]
 pub struct Cli {
+    /// File Path
     #[clap(short, long, value_parser)]
-    files: i32,
+    path: PathBuf,
 
-    #[clap(short, long, value_parser)]
-    lower: usize,
+    #[clap(subcommand)]
+    file_sizes: FileSizes,
 
-    #[clap(short, long, value_parser)]
-    higher: usize,
-
-    #[clap(short, long, value_parser)]
-    threads: usize
+    /// Confirms the creation of files without interaction
+    #[clap(short, long, default_value = "false")]
+    confirm: bool
 }
 
+#[derive(Subcommand)]
+enum FileSizes {
+    /// static file size
+    Static {
+        /// Number of files to create
+        #[arg(short, long, value_parser)]
+        files: i32,
+
+        /// Size of files to create in KB
+        #[clap(short, long, value_parser)]
+        size: usize,
+
+        /// Number of threads to use, defaults to number of cores
+        #[clap(short, long, default_value_t = num_cpus::get())]
+        threads: usize,
+    },
+    /// random file size
+    Random {
+        /// Number of files to create
+        #[clap(short, long, value_parser)]
+        files: i32,
+
+        /// Lower bound of file size in KB
+        #[clap(long, value_parser)]
+        lower: usize,
+
+        /// Upper bound of file size in KB
+        #[clap(long, value_parser)]
+        higher: usize,
+
+        /// Number of threads to use, defaults to number of cores
+        #[clap(short, long, default_value_t = num_cpus::get())]
+        threads: usize,
+    },
+}
+
+fn check_ok(files: &i64, cap: &i64) -> bool {
+    let max_cap = (files * cap) / 1048576;
+    println!("Max capacity is {} MB", max_cap);
+    Confirm::new()
+        .with_prompt(format!("Are you sure you want to create {} files?", files))
+        .interact()
+        .unwrap()
+}
+
+fn static_files(files: i32, size: usize, threads: usize, path: PathBuf, confirm: bool) {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build_global()
+        .unwrap();
+
+    let bar = ProgressBar::new(files.try_into().unwrap());
+
+    let size_kb = size * 1024;
+
+    if confirm {
+        run_static(files, size_kb, path, bar);
+    } else if check_ok(&files.into(), &(size as i64)) {
+        run_static(files, size_kb, path, bar);
+    } else {
+        println!("Quitting")
+    }
+}
+
+fn run_static(files: i32, size: usize, path: PathBuf, bar: ProgressBar) {
+    (0..files).into_par_iter().for_each(|x| {
+        let fake_string = size.fake::<String>();
+        let file_name = format!("file{}.txt", x);
+        let file_path = path.join(file_name);
+        let mut file = File::create(file_path).unwrap();
+        file.write_all(fake_string.as_bytes()).unwrap();
+        bar.inc(1)
+    });
+}
+
+fn random_files(files: i32, lower: usize, higher: usize, threads: usize, path: PathBuf, confirm: bool) {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build_global()
+        .unwrap();
+
+    let lower_kb = lower * 1024;
+    let higher_kb = higher * 1024;
+
+    let bar = ProgressBar::new(files.try_into().unwrap());
+
+    if confirm {
+        run_random(files, lower_kb, higher_kb, path, bar);
+    } else if check_ok(&files.into(), &(higher as i64)) {
+        run_random(files, lower_kb, higher_kb, path, bar);
+    } else {
+        println!("Quitting")
+    }
+}
+
+fn run_random(files: i32, lower: usize, higher: usize, path: PathBuf, bar: ProgressBar) {
+    (0..files).into_par_iter().for_each(|x| {
+        let file_size = rand::thread_rng().gen_range(lower..higher);
+        let fake_string = file_size.fake::<String>();
+        let file_name = format!("file{}.txt", x);
+        let file_path = path.join(file_name);
+        let mut file = File::create(file_path).unwrap();
+        file.write_all(fake_string.as_bytes()).unwrap();
+        bar.inc(1)
+    })
+}
 
 fn main() {
     let cli = Cli::parse();
 
-
-    let num_cpu = num_cpus::get();
-    let mut _threads_check: usize = 0;
-    if cli.threads > num_cpu {
-        _threads_check = num_cpu;
-        println!("Specified threads higher than available, using: {}", _threads_check);
-    } else {
-        _threads_check = cli.threads
+    match &cli.file_sizes {
+        FileSizes::Static {
+            files,
+            size,
+            threads,
+        } => static_files(*files, *size, *threads, cli.path, cli.confirm),
+        FileSizes::Random {
+            files,
+            lower,
+            higher,
+            threads,
+        } => random_files(*files, *lower, *higher, *threads, cli.path, cli.confirm),
     }
-
-    let max_cap = (cli.files as i64 * cli.higher as i64) / 1048576;
-    println!("Max capacity is {} MB", max_cap);
-
-    if Confirm::new().with_prompt(format!("Are you sure you want to create {} files?", cli.files)).interact().unwrap() {
-        rayon::ThreadPoolBuilder::new().num_threads(_threads_check).build_global().unwrap();
-
-        let bar = ProgressBar::new(cli.files.try_into().unwrap());
-        
-        (0..cli.files).into_par_iter().for_each(|x| {
-            let file_size = rand::thread_rng().gen_range(cli.lower..cli.higher);
-            let fake_string = file_size.fake::<String>();
-            let file_name = format!("file{}.txt", x);
-            let mut file = File::create(file_name).unwrap();
-            file.write_all(fake_string.as_bytes()).unwrap();
-            bar.inc(1)
-        });
-    } else {
-        println!("Quitting")
-    }
-
-
-        // sp.stop();
-
-
 }
-    
-
-
-
